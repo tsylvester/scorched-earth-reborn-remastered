@@ -23,7 +23,7 @@ export class AIPlayer {
       const heightDiff = terrain[Math.floor(enemy.vehicle.x)] - terrain[Math.floor(player.vehicle.x)];
       
       // Calculate optimal angle and power for this target
-      const optimalAngle = this.calculateOptimalAngle(distance, heightDiff, wind);
+      const optimalAngle = this.calculateOptimalAngle(distance, heightDiff, wind, player.vehicle.x, enemy.vehicle.x);
       const optimalPower = this.calculateOptimalPower(distance, wind);
       
       // Score this shot based on hit probability and damage potential
@@ -35,7 +35,8 @@ export class AIPlayer {
         optimalAngle,
         optimalPower,
         wind,
-        terrain
+        terrain,
+        canvasHeight
       );
       
       const score = hitProbability * enemy.vehicle.health;
@@ -47,39 +48,50 @@ export class AIPlayer {
       }
     });
 
+    console.log(`AI ${player.name} calculated best shot: angle ${bestShot.angle}°, power ${bestShot.power}%`);
     return { ...bestShot, targetId };
   }
 
-  private static calculateOptimalAngle(distance: number, heightDiff: number, wind: Wind): number {
-    // Basic trajectory calculation
-    let baseAngle = 45;
+  private static calculateOptimalAngle(distance: number, heightDiff: number, wind: Wind, startX: number, targetX: number): number {
+    // Determine if target is to the left or right
+    const targetDirection = targetX > startX ? 1 : -1;
+    
+    // Base angle calculation for ballistic trajectory
+    let baseAngle = 45 * targetDirection;
     
     // Adjust for height difference
     if (heightDiff > 0) {
-      baseAngle += Math.min(20, heightDiff * 0.1);
+      // Target is higher, aim more upward
+      baseAngle += Math.min(20, heightDiff * 0.05) * targetDirection;
     } else {
-      baseAngle -= Math.min(20, Math.abs(heightDiff) * 0.1);
+      // Target is lower, aim more downward
+      baseAngle -= Math.min(20, Math.abs(heightDiff) * 0.05) * targetDirection;
     }
     
-    // Adjust for wind
+    // Adjust for wind - compensate by aiming into the wind
     if (wind.speed > 0) {
-      baseAngle -= wind.speed * 0.5;
+      baseAngle -= wind.speed * 0.3; // Compensate for right wind
     } else {
-      baseAngle += Math.abs(wind.speed) * 0.5;
+      baseAngle += Math.abs(wind.speed) * 0.3; // Compensate for left wind
     }
     
+    // Clamp to valid range
     return Math.max(-90, Math.min(90, baseAngle));
   }
 
   private static calculateOptimalPower(distance: number, wind: Wind): number {
-    let basePower = Math.min(100, distance * 0.1 + 30);
+    // Base power calculation based on distance
+    let basePower = Math.min(95, Math.max(30, distance * 0.08 + 25));
     
-    // Adjust for wind resistance
-    if (Math.abs(wind.speed) > 5) {
-      basePower += Math.abs(wind.speed) * 2;
+    // Adjust for wind resistance - need more power when firing into wind
+    if (Math.abs(wind.speed) > 2) {
+      basePower += Math.abs(wind.speed) * 1.5;
     }
     
-    return Math.max(10, Math.min(100, basePower));
+    // Add some randomness for variety
+    basePower += (Math.random() - 0.5) * 10;
+    
+    return Math.max(20, Math.min(100, basePower));
   }
 
   private static calculateHitProbability(
@@ -90,35 +102,47 @@ export class AIPlayer {
     angle: number,
     power: number,
     wind: Wind,
-    terrain: number[]
+    terrain: number[],
+    canvasHeight: number
   ): number {
     // Simulate trajectory to estimate hit probability
-    const angleRad = (angle * Math.PI) / 180;
-    const velocity = power * 2;
-    let vx = Math.cos(angleRad) * velocity;
-    let vy = -Math.sin(angleRad) * velocity;
+    const angleRad = ((90 - angle) * Math.PI) / 180;
+    const baseVelocity = 6;
+    const scaledVelocity = (power / 100) * baseVelocity;
+    let vx = Math.sin(angleRad) * scaledVelocity;
+    let vy = -Math.cos(angleRad) * scaledVelocity;
     
     let x = startX;
-    let y = startY;
+    let y = canvasHeight - startY - 20; // Start from vehicle position
+    let closestDistance = Infinity;
     
-    for (let t = 0; t < 200; t++) {
-      vy += 0.5; // gravity
-      vx += wind.speed * 0.1; // wind
+    for (let t = 0; t < 300; t++) {
+      vy += 0.08; // gravity
+      vx += wind.speed * 0.002; // wind effect
       
-      x += vx * 0.1;
-      y += vy * 0.1;
+      x += vx;
+      y += vy;
       
-      if (x < 0 || x >= terrain.length) break;
+      if (x < 0 || x >= terrain.length || y >= canvasHeight) break;
       
-      const terrainHeight = terrain[Math.floor(x)];
+      const terrainHeight = canvasHeight - (terrain[Math.floor(x)] || 0);
       if (y >= terrainHeight) {
-        // Check if we hit near the target
-        const distance = Math.abs(x - targetX);
-        return Math.max(0, 1 - distance / 50); // 50 pixel tolerance
+        // Check distance to target when projectile hits terrain
+        const distanceToTarget = Math.abs(x - targetX);
+        closestDistance = Math.min(closestDistance, distanceToTarget);
+        break;
       }
+      
+      // Track closest approach to target
+      const distanceToTarget = Math.sqrt(
+        Math.pow(x - targetX, 2) + 
+        Math.pow(y - (canvasHeight - targetY - 10), 2)
+      );
+      closestDistance = Math.min(closestDistance, distanceToTarget);
     }
     
-    return 0;
+    // Convert distance to probability (closer = higher probability)
+    return Math.max(0, 1 - closestDistance / 80); // 80 pixel tolerance
   }
 
   static selectWeapon(player: Player, enemies: Player[]): string {

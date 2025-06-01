@@ -23,16 +23,22 @@ const WEAPON_DATA = {
 
 export const WeaponShop: React.FC<WeaponShopProps> = ({ onClose }) => {
   const { state, dispatch } = useGame();
-  const currentPlayer = state.players[state.currentPlayerIndex];
+  
+  // Always use the current player from the game state
+  const currentPlayer = state.players.find(p => p.isHuman && p.id === state.players[state.currentPlayerIndex]?.id) || 
+                       state.players.find(p => p.isHuman); // Fallback to first human player
 
   const purchaseWeapon = (weapon: string, quantity: number = 1) => {
-    if (!currentPlayer) return;
+    if (!currentPlayer) {
+      console.log('No human player found to purchase weapons for');
+      return;
+    }
     
     const weaponData = WEAPON_DATA[weapon as keyof typeof WEAPON_DATA];
     const totalCost = weaponData.price * quantity;
     
     if (currentPlayer.money >= totalCost) {
-      console.log(`Purchasing ${quantity} ${weapon}(s) for $${totalCost}`);
+      console.log(`${currentPlayer.name} purchasing ${quantity} ${weapon}(s) for $${totalCost}`);
       dispatch({
         type: 'PURCHASE_WEAPON',
         playerId: currentPlayer.id,
@@ -41,17 +47,31 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({ onClose }) => {
         cost: totalCost,
       });
     } else {
-      console.log(`Not enough money to purchase ${weapon}. Need $${totalCost}, have $${currentPlayer.money}`);
+      console.log(`${currentPlayer.name} doesn't have enough money to purchase ${weapon}. Need $${totalCost}, have $${currentPlayer.money}`);
     }
   };
 
-  if (!currentPlayer) return null;
+  if (!currentPlayer) {
+    return (
+      <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <Card className="w-96 bg-gray-800 border-orange-500">
+          <CardHeader>
+            <CardTitle className="text-orange-400">Weapon Shop</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-white">No human player found. Shop only available for human players.</p>
+            <Button onClick={onClose} className="mt-4">Close</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <Card className="w-96 max-h-96 overflow-y-auto bg-gray-800 border-orange-500">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-orange-400">Weapon Shop</CardTitle>
+          <CardTitle className="text-orange-400">Weapon Shop - {currentPlayer.name}</CardTitle>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>

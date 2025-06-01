@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useReducer, ReactNode } from 'react';
 
 export type Theme = 'light' | 'dark' | 'vaporwave' | 'cyberpunk' | 'original';
@@ -65,6 +64,9 @@ type GameAction =
   | { type: 'FIRE_WEAPON'; playerId: string; targetX: number; targetY: number }
   | { type: 'DAMAGE_TERRAIN'; points: { x: number; y: number; radius: number }[] }
   | { type: 'PURCHASE_WEAPON'; playerId: string; weapon: string; quantity: number; cost: number }
+  | { type: 'DAMAGE_PLAYERS'; damages: { playerId: string; damage: number }[] }
+  | { type: 'DESTROY_TERRAIN'; x: number; y: number; radius: number }
+  | { type: 'SET_GAME_PHASE'; phase: GameState['gamePhase'] }
   | { type: 'NEXT_ROUND' }
   | { type: 'RESTART_GAME' };
 
@@ -95,6 +97,8 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         terrain: generateTerrain(action.config.terrainComplexity),
         wind: generateWind(),
       };
+    case 'SET_GAME_PHASE':
+      return { ...state, gamePhase: action.phase };
     case 'UPDATE_PLAYER':
       return {
         ...state,
@@ -124,11 +128,43 @@ function gameReducer(state: GameState, action: GameAction): GameState {
           return player;
         })
       };
+    case 'DAMAGE_PLAYERS':
+      return {
+        ...state,
+        players: state.players.map(player => {
+          const damage = action.damages.find(d => d.playerId === player.id);
+          if (damage) {
+            const newHealth = Math.max(0, player.vehicle.health - damage.damage);
+            return {
+              ...player,
+              vehicle: { ...player.vehicle, health: newHealth },
+              isAlive: newHealth > 0
+            };
+          }
+          return player;
+        })
+      };
+    case 'DESTROY_TERRAIN':
+      const newTerrain = [...state.terrain];
+      const radius = action.radius;
+      for (let x = Math.max(0, action.x - radius); x < Math.min(newTerrain.length, action.x + radius); x++) {
+        const distance = Math.abs(x - action.x);
+        if (distance <= radius) {
+          const explosionDepth = Math.sqrt(radius * radius - distance * distance);
+          newTerrain[x] = Math.max(0, newTerrain[x] - explosionDepth * 2);
+        }
+      }
+      return { ...state, terrain: newTerrain };
     case 'NEXT_PLAYER':
       const alivePlayers = state.players.filter(p => p.isAlive);
+      if (alivePlayers.length <= 1) {
+        return { ...state, gamePhase: 'roundEnd' };
+      }
+      
       const currentAliveIndex = alivePlayers.findIndex(p => p.id === state.players[state.currentPlayerIndex]?.id);
       const nextAliveIndex = (currentAliveIndex + 1) % alivePlayers.length;
       const nextPlayerIndex = state.players.findIndex(p => p.id === alivePlayers[nextAliveIndex]?.id);
+      
       return { 
         ...state, 
         currentPlayerIndex: nextPlayerIndex,
@@ -156,8 +192,12 @@ function generatePlayers(config: GameConfig): Player[] {
   const names = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel'];
   
   for (let i = 0; i < config.numPlayers; i++) {
+    // Spread vehicles evenly across the full map width (1000px)
+    const spacing = 900 / (config.numPlayers - 1); // Leave 50px margin on each side
+    const baseX = 50 + (i * spacing);
+    
     players.push({
-      id: `player-${i}-${Date.now()}`, // Add timestamp for uniqueness
+      id: `player-${i}-${Date.now()}-${Math.random()}`,
       name: i < config.numHumans ? `Player ${i + 1}` : `CPU ${names[i]}`,
       isHuman: i < config.numHumans,
       money: 1000,
@@ -165,7 +205,7 @@ function generatePlayers(config: GameConfig): Player[] {
       wins: 0,
       isAlive: true,
       vehicle: {
-        x: 100 + (i * 700 / config.numPlayers) + Math.random() * 50, // Add some randomness
+        x: baseX,
         y: 0,
         health: 100,
         maxHealth: 100,
@@ -191,16 +231,31 @@ function generateTerrain(complexity: number): number[] {
   const width = 1000;
   const terrain: number[] = [];
   const baseHeight = 300;
-  const amplitude = 100 + (complexity * 200);
+  const amplitude = 50 + (complexity * 150); // Scale amplitude with complexity
   
-  // Add randomness to terrain generation
-  const randomSeed = Math.random() * 100;
+  // Create multiple noise layers for realistic terrain
+  const seed1 = Math.random() * 1000;
+  const seed2 = Math.random() * 1000;
+  const seed3 = Math.random() * 1000;
   
   for (let x = 0; x < width; x++) {
-    const noise1 = Math.sin((x + randomSeed) * 0.01) * amplitude * 0.5;
-    const noise2 = Math.sin((x + randomSeed) * 0.03) * amplitude * 0.3;
-    const noise3 = Math.sin((x + randomSeed) * 0.1) * amplitude * 0.2 * complexity;
-    terrain[x] = baseHeight + noise1 + noise2 + noise3;
+    // Primary wave - large features
+    const wave1 = Math.sin((x + seed1) * 0.008) * amplitude * 0.6;
+    // Secondary wave - medium features  
+    const wave2 = Math.sin((x + seed2) * 0.02) * amplitude * 0.3;
+    // Tertiary wave - small details
+    const wave3 = Math.sin((x + seed3) * 0.05) * amplitude * 0.1 * complexity;
+    // Random noise for variation
+    const noise = (Math.random() - 0.5) * 20 * complexity;
+    
+    terrain[x] = Math.max(50, baseHeight + wave1 + wave2 + wave3 + noise);
+  }
+  
+  // Smooth the terrain to avoid jagged edges
+  for (let pass = 0; pass < 2; pass++) {
+    for (let x = 1; x < width - 1; x++) {
+      terrain[x] = (terrain[x - 1] + terrain[x] + terrain[x + 1]) / 3;
+    }
   }
   
   return terrain;
@@ -208,7 +263,7 @@ function generateTerrain(complexity: number): number[] {
 
 function generateWind(): Wind {
   return {
-    speed: (Math.random() - 0.5) * 20,
+    speed: (Math.random() - 0.5) * 8, // Reduced from 20 to 8
     direction: Math.random() * 360,
   };
 }

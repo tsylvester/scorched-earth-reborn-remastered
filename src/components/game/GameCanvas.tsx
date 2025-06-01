@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useGame } from '../../contexts/GameContext';
+import { AIPlayer } from '../../utils/aiPlayer';
 
 export const GameCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -13,6 +14,62 @@ export const GameCanvas: React.FC = () => {
     playerId: string;
     weapon: string;
   }>>([]);
+
+  // AI turn handling
+  useEffect(() => {
+    if (state.gamePhase === 'aiming' && state.players[state.currentPlayerIndex] && !state.players[state.currentPlayerIndex].isHuman) {
+      const aiPlayer = state.players[state.currentPlayerIndex];
+      const enemies = state.players.filter(p => p.id !== aiPlayer.id && p.isAlive);
+      
+      if (enemies.length > 0) {
+        // Delay AI action to make it visible
+        setTimeout(() => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          
+          const bestShot = AIPlayer.calculateBestShot(aiPlayer, enemies, state.terrain, state.wind, canvas.height);
+          
+          // Update AI player's vehicle settings
+          dispatch({
+            type: 'UPDATE_PLAYER',
+            playerId: aiPlayer.id,
+            updates: {
+              vehicle: {
+                ...aiPlayer.vehicle,
+                angle: bestShot.angle,
+                power: bestShot.power,
+              }
+            }
+          });
+          
+          // Fire after a short delay
+          setTimeout(() => {
+            fireProjectile(aiPlayer.id, aiPlayer.vehicle.selectedWeapon);
+            
+            // Consume ammunition
+            dispatch({
+              type: 'UPDATE_PLAYER',
+              playerId: aiPlayer.id,
+              updates: {
+                vehicle: {
+                  ...aiPlayer.vehicle,
+                  weapons: {
+                    ...aiPlayer.vehicle.weapons,
+                    [aiPlayer.vehicle.selectedWeapon]: Math.max(0, aiPlayer.vehicle.weapons[aiPlayer.vehicle.selectedWeapon] - 1)
+                  }
+                }
+              }
+            });
+            
+            // Move to next player after projectile completes
+            setTimeout(() => {
+              dispatch({ type: 'NEXT_PLAYER' });
+            }, 3000);
+          }, 500);
+        }, 1000);
+      }
+    }
+  }, [state.currentPlayerIndex, state.gamePhase, state.players]);
 
   const getThemeColors = useCallback(() => {
     switch (state.theme) {
@@ -172,7 +229,7 @@ export const GameCanvas: React.FC = () => {
     
     // Scale velocity so 100% power covers 3/4 of map width
     const maxRange = canvasWidth * 0.75;
-    const baseVelocity = 8; // Base velocity for physics
+    const baseVelocity = 6; // Reduced base velocity for more reasonable trajectory
     const scaledVelocity = (power / 100) * baseVelocity;
     const vx = Math.sin(angleRad) * scaledVelocity;
     const vy = -Math.cos(angleRad) * scaledVelocity;
@@ -185,8 +242,8 @@ export const GameCanvas: React.FC = () => {
     ctx.moveTo(x, y);
     
     for (let t = 0; t < 500; t++) {
-      velY += 0.1; // gravity
-      velX += wind.speed * 0.01; // Much reduced wind effect
+      velY += 0.08; // gravity
+      velX += wind.speed * 0.002; // Much reduced wind effect
       
       x += velX;
       y += velY;
@@ -280,8 +337,8 @@ export const GameCanvas: React.FC = () => {
     const animate = () => {
       setProjectiles(prev => {
         const updated = prev.map(projectile => {
-          const newVy = projectile.vy + 0.1; // gravity
-          const newVx = projectile.vx + state.wind.speed * 0.01; // wind effect
+          const newVy = projectile.vy + 0.08; // gravity
+          const newVx = projectile.vx + state.wind.speed * 0.002; // Much reduced wind effect
           const newX = projectile.x + newVx;
           const newY = projectile.y + newVy;
           
@@ -294,19 +351,35 @@ export const GameCanvas: React.FC = () => {
           };
         });
 
-        // Remove projectiles that hit terrain or go off screen
+        // Check collisions and remove projectiles that hit
         return updated.filter(projectile => {
           const canvas = canvasRef.current;
           if (!canvas) return false;
           
+          // Check bounds
           if (projectile.x < 0 || projectile.x >= canvas.width || projectile.y >= canvas.height) {
             return false;
           }
           
+          // Check terrain collision
           const terrainHeight = canvas.height - (state.terrain[Math.floor(projectile.x)] || 0);
           if (projectile.y >= terrainHeight) {
-            // Handle explosion damage here
+            // Handle explosion
+            handleExplosion(projectile.x, terrainHeight, projectile.weapon);
             return false;
+          }
+          
+          // Check vehicle collision
+          for (const player of state.players) {
+            if (!player.isAlive) continue;
+            const distance = Math.sqrt(
+              Math.pow(projectile.x - player.vehicle.x, 2) + 
+              Math.pow(projectile.y - (canvas.height - state.terrain[Math.floor(player.vehicle.x)] - 10), 2)
+            );
+            if (distance < 15) {
+              handleExplosion(projectile.x, projectile.y, projectile.weapon);
+              return false;
+            }
           }
           
           return true;
@@ -316,7 +389,56 @@ export const GameCanvas: React.FC = () => {
 
     const interval = setInterval(animate, 16); // ~60fps
     return () => clearInterval(interval);
-  }, [projectiles, state.terrain, state.wind.speed]);
+  }, [projectiles, state.terrain, state.wind.speed, state.players]);
+
+  const handleExplosion = (x: number, y: number, weapon: string) => {
+    const weaponData = {
+      missile: { radius: 30, damage: 25 },
+      heavy: { radius: 40, damage: 40 },
+      cluster: { radius: 50, damage: 60 },
+      nuke: { radius: 80, damage: 100 },
+      tracer: { radius: 20, damage: 15 },
+      funky: { radius: 60, damage: 30 },
+      death: { radius: 35, damage: 80 },
+      roller: { radius: 25, damage: 20 },
+    };
+
+    const data = weaponData[weapon as keyof typeof weaponData] || weaponData.missile;
+    
+    // Damage terrain
+    dispatch({
+      type: 'DESTROY_TERRAIN',
+      x: Math.floor(x),
+      y: Math.floor(y),
+      radius: data.radius
+    });
+    
+    // Damage players in radius
+    const damages: { playerId: string; damage: number }[] = [];
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    state.players.forEach(player => {
+      if (!player.isAlive) return;
+      
+      const vehicleY = canvas.height - state.terrain[Math.floor(player.vehicle.x)] - 10;
+      const distance = Math.sqrt(
+        Math.pow(player.vehicle.x - x, 2) + 
+        Math.pow(vehicleY - y, 2)
+      );
+      
+      if (distance <= data.radius) {
+        const damagePercent = 1 - (distance / data.radius);
+        const damage = Math.floor(data.damage * damagePercent);
+        damages.push({ playerId: player.id, damage });
+        console.log(`${player.name} takes ${damage} damage from explosion`);
+      }
+    });
+    
+    if (damages.length > 0) {
+      dispatch({ type: 'DAMAGE_PLAYERS', damages });
+    }
+  };
 
   // Function to fire a projectile
   const fireProjectile = useCallback((playerId: string, weapon: string) => {
@@ -337,10 +459,12 @@ export const GameCanvas: React.FC = () => {
     const startY = vehicleY - Math.cos(angleRad) * turretLength;
     
     // Calculate initial velocity
-    const baseVelocity = 8;
+    const baseVelocity = 6; // Reduced for more realistic physics
     const scaledVelocity = (vehicle.power / 100) * baseVelocity;
     const vx = Math.sin(angleRad) * scaledVelocity;
     const vy = -Math.cos(angleRad) * scaledVelocity;
+
+    console.log(`${player.name} firing ${weapon} from (${startX.toFixed(1)}, ${startY.toFixed(1)}) with velocity (${vx.toFixed(2)}, ${vy.toFixed(2)})`);
 
     setProjectiles(prev => [...prev, {
       x: startX,
@@ -357,6 +481,7 @@ export const GameCanvas: React.FC = () => {
     (window as any).fireProjectile = fireProjectile;
   }, [fireProjectile]);
 
+  // ... keep existing code (useEffect for canvas setup and drawing)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
