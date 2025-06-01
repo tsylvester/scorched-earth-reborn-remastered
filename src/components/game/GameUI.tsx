@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { useGame } from '../../contexts/GameContext';
 import { Button } from '@/components/ui/button';
@@ -98,10 +99,7 @@ export const GameUI: React.FC<GameUIProps> = ({ onBackToMenu, onRestart, onOpenS
       (window as any).fireProjectile(currentPlayer.id, selectedWeapon);
     }
     
-    // Move to next player after a delay to allow projectile to complete
-    setTimeout(() => {
-      dispatch({ type: 'NEXT_PLAYER' });
-    }, 3000);
+    // Don't advance player here - let explosion handler do it
   };
 
   const getAvailableWeapons = () => {

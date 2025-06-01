@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useGame } from '../../contexts/GameContext';
 import { AIPlayer } from '../../utils/aiPlayer';
@@ -60,11 +61,6 @@ export const GameCanvas: React.FC = () => {
                 }
               }
             });
-            
-            // Move to next player after projectile completes
-            setTimeout(() => {
-              dispatch({ type: 'NEXT_PLAYER' });
-            }, 3000);
           }, 500);
         }, 1000);
       }
@@ -157,9 +153,9 @@ export const GameCanvas: React.FC = () => {
       ctx.fillStyle = player.color;
       ctx.fillRect(vehicle.x - 10, vehicleY, 20, 15);
       
-      // Vehicle turret - angle should be from vertical axis
+      // Vehicle turret - angle from vertical (0° = up, positive = right, negative = left)
       const turretLength = 25;
-      const angleRad = ((90 - vehicle.angle) * Math.PI) / 180; // Convert from vertical reference
+      const angleRad = (vehicle.angle * Math.PI) / 180;
       const turretEndX = vehicle.x + Math.sin(angleRad) * turretLength;
       const turretEndY = vehicleY - Math.cos(angleRad) * turretLength;
       
@@ -204,7 +200,7 @@ export const GameCanvas: React.FC = () => {
       
       // Calculate turret end position for trajectory start
       const turretLength = 25;
-      const angleRad = ((90 - vehicle.angle) * Math.PI) / 180;
+      const angleRad = (vehicle.angle * Math.PI) / 180;
       const turretEndX = vehicle.x + Math.sin(angleRad) * turretLength;
       const turretEndY = vehicleY - Math.cos(angleRad) * turretLength;
       
@@ -225,11 +221,11 @@ export const GameCanvas: React.FC = () => {
     ctx.beginPath();
 
     // Convert angle from vertical reference to radians
-    const angleRad = ((90 - angle) * Math.PI) / 180;
+    const angleRad = (angle * Math.PI) / 180;
     
     // Scale velocity so 100% power covers 3/4 of map width
     const maxRange = canvasWidth * 0.75;
-    const baseVelocity = 6; // Reduced base velocity for more reasonable trajectory
+    const baseVelocity = Math.sqrt(maxRange * 0.08) * 0.8; // Calculated for 3/4 range
     const scaledVelocity = (power / 100) * baseVelocity;
     const vx = Math.sin(angleRad) * scaledVelocity;
     const vy = -Math.cos(angleRad) * scaledVelocity;
@@ -243,7 +239,7 @@ export const GameCanvas: React.FC = () => {
     
     for (let t = 0; t < 500; t++) {
       velY += 0.08; // gravity
-      velX += wind.speed * 0.002; // Much reduced wind effect
+      velX += wind.speed * 0.0002; // Greatly reduced wind effect
       
       x += velX;
       y += velY;
@@ -312,10 +308,10 @@ export const GameCanvas: React.FC = () => {
     const dy = vehicleScreenY - y;
     
     // Convert to angle from vertical (0 = straight up, positive = right, negative = left)
-    const angle = Math.atan2(dx, dy) * (180 / Math.PI);
+    let angle = Math.atan2(dx, dy) * (180 / Math.PI);
     
-    // Clamp angle between -90 and 90 degrees
-    const clampedAngle = Math.max(-90, Math.min(90, angle));
+    // Clamp angle between -90 and 90 degrees (upper hemisphere only)
+    angle = Math.max(-90, Math.min(90, angle));
     
     // Update vehicle angle
     dispatch({
@@ -324,7 +320,7 @@ export const GameCanvas: React.FC = () => {
       updates: {
         vehicle: {
           ...vehicle,
-          angle: clampedAngle,
+          angle: angle,
         },
       },
     });
@@ -338,7 +334,7 @@ export const GameCanvas: React.FC = () => {
       setProjectiles(prev => {
         const updated = prev.map(projectile => {
           const newVy = projectile.vy + 0.08; // gravity
-          const newVx = projectile.vx + state.wind.speed * 0.002; // Much reduced wind effect
+          const newVx = projectile.vx + state.wind.speed * 0.0002; // Much reduced wind effect
           const newX = projectile.x + newVx;
           const newY = projectile.y + newVy;
           
@@ -372,9 +368,11 @@ export const GameCanvas: React.FC = () => {
           // Check vehicle collision
           for (const player of state.players) {
             if (!player.isAlive) continue;
+            const playerTerrainY = state.terrain[Math.floor(player.vehicle.x)] || 0;
+            const playerY = canvas.height - playerTerrainY - 10;
             const distance = Math.sqrt(
               Math.pow(projectile.x - player.vehicle.x, 2) + 
-              Math.pow(projectile.y - (canvas.height - state.terrain[Math.floor(player.vehicle.x)] - 10), 2)
+              Math.pow(projectile.y - playerY, 2)
             );
             if (distance < 15) {
               handleExplosion(projectile.x, projectile.y, projectile.weapon);
@@ -438,6 +436,11 @@ export const GameCanvas: React.FC = () => {
     if (damages.length > 0) {
       dispatch({ type: 'DAMAGE_PLAYERS', damages });
     }
+
+    // After explosion, move to next player
+    setTimeout(() => {
+      dispatch({ type: 'NEXT_PLAYER' });
+    }, 1000);
   };
 
   // Function to fire a projectile
@@ -454,12 +457,13 @@ export const GameCanvas: React.FC = () => {
     
     // Calculate turret end position
     const turretLength = 25;
-    const angleRad = ((90 - vehicle.angle) * Math.PI) / 180;
+    const angleRad = (vehicle.angle * Math.PI) / 180;
     const startX = vehicle.x + Math.sin(angleRad) * turretLength;
     const startY = vehicleY - Math.cos(angleRad) * turretLength;
     
-    // Calculate initial velocity
-    const baseVelocity = 6; // Reduced for more realistic physics
+    // Calculate initial velocity - scaled for 3/4 map range at 100% power
+    const maxRange = canvas.width * 0.75;
+    const baseVelocity = Math.sqrt(maxRange * 0.08) * 0.8;
     const scaledVelocity = (vehicle.power / 100) * baseVelocity;
     const vx = Math.sin(angleRad) * scaledVelocity;
     const vy = -Math.cos(angleRad) * scaledVelocity;

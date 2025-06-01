@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useReducer, ReactNode } from 'react';
 
 export type Theme = 'light' | 'dark' | 'vaporwave' | 'cyberpunk' | 'original';
@@ -161,13 +162,15 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         return { ...state, gamePhase: 'roundEnd' };
       }
       
-      const currentAliveIndex = alivePlayers.findIndex(p => p.id === state.players[state.currentPlayerIndex]?.id);
-      const nextAliveIndex = (currentAliveIndex + 1) % alivePlayers.length;
-      const nextPlayerIndex = state.players.findIndex(p => p.id === alivePlayers[nextAliveIndex]?.id);
+      // Find next alive player in sequence
+      let nextIndex = (state.currentPlayerIndex + 1) % state.players.length;
+      while (!state.players[nextIndex].isAlive) {
+        nextIndex = (nextIndex + 1) % state.players.length;
+      }
       
       return { 
         ...state, 
-        currentPlayerIndex: nextPlayerIndex,
+        currentPlayerIndex: nextIndex,
         gamePhase: 'aiming'
       };
     case 'RESTART_GAME':
@@ -192,9 +195,9 @@ function generatePlayers(config: GameConfig): Player[] {
   const names = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel'];
   
   for (let i = 0; i < config.numPlayers; i++) {
-    // Spread vehicles evenly across the full map width (1000px)
-    const spacing = 900 / (config.numPlayers - 1); // Leave 50px margin on each side
-    const baseX = 50 + (i * spacing);
+    // Distribute vehicles evenly across the full map width (1000px)
+    const spacing = 900 / Math.max(1, config.numPlayers - 1); // Prevent division by zero
+    const baseX = config.numPlayers === 1 ? 500 : 50 + (i * spacing); // Handle single player case
     
     players.push({
       id: `player-${i}-${Date.now()}-${Math.random()}`,
@@ -211,7 +214,7 @@ function generatePlayers(config: GameConfig): Player[] {
         maxHealth: 100,
         fuel: 100,
         maxFuel: 100,
-        angle: 45,
+        angle: 0, // Start pointing straight up
         power: 50,
         weapons: {
           'missile': 10,
@@ -231,28 +234,35 @@ function generateTerrain(complexity: number): number[] {
   const width = 1000;
   const terrain: number[] = [];
   const baseHeight = 300;
-  const amplitude = 50 + (complexity * 150); // Scale amplitude with complexity
+  const amplitude = 50 + (complexity * 100);
   
-  // Create multiple noise layers for realistic terrain
-  const seed1 = Math.random() * 1000;
-  const seed2 = Math.random() * 1000;
-  const seed3 = Math.random() * 1000;
+  // Create multiple noise layers for realistic terrain with varied features
+  const numLayers = 4 + Math.floor(complexity * 2);
+  const seeds = Array(numLayers).fill(0).map(() => Math.random() * 1000);
+  const frequencies = [0.003, 0.008, 0.02, 0.05, 0.1, 0.15];
+  const amplitudes = [0.6, 0.3, 0.15, 0.08, 0.04, 0.02];
   
   for (let x = 0; x < width; x++) {
-    // Primary wave - large features
-    const wave1 = Math.sin((x + seed1) * 0.008) * amplitude * 0.6;
-    // Secondary wave - medium features  
-    const wave2 = Math.sin((x + seed2) * 0.02) * amplitude * 0.3;
-    // Tertiary wave - small details
-    const wave3 = Math.sin((x + seed3) * 0.05) * amplitude * 0.1 * complexity;
-    // Random noise for variation
-    const noise = (Math.random() - 0.5) * 20 * complexity;
+    let height = baseHeight;
     
-    terrain[x] = Math.max(50, baseHeight + wave1 + wave2 + wave3 + noise);
+    // Layer multiple noise functions for realistic terrain
+    for (let layer = 0; layer < numLayers && layer < frequencies.length; layer++) {
+      const wave = Math.sin((x + seeds[layer]) * frequencies[layer]);
+      height += wave * amplitude * amplitudes[layer];
+    }
+    
+    // Add some peaks and valleys for interest
+    const peakChance = Math.sin(x * 0.01 + seeds[0]) * Math.sin(x * 0.007 + seeds[1]);
+    height += peakChance * amplitude * 0.4;
+    
+    // Add random variation
+    height += (Math.random() - 0.5) * 15 * complexity;
+    
+    terrain[x] = Math.max(50, Math.min(450, height));
   }
   
   // Smooth the terrain to avoid jagged edges
-  for (let pass = 0; pass < 2; pass++) {
+  for (let pass = 0; pass < 3; pass++) {
     for (let x = 1; x < width - 1; x++) {
       terrain[x] = (terrain[x - 1] + terrain[x] + terrain[x + 1]) / 3;
     }
@@ -263,7 +273,7 @@ function generateTerrain(complexity: number): number[] {
 
 function generateWind(): Wind {
   return {
-    speed: (Math.random() - 0.5) * 8, // Reduced from 20 to 8
+    speed: (Math.random() - 0.5) * 4, // Reduced from 8 to 4
     direction: Math.random() * 360,
   };
 }
