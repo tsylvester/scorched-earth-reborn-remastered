@@ -6,7 +6,6 @@ export const GameCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { state, dispatch } = useGame();
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
 
   const getThemeColors = useCallback(() => {
     switch (state.theme) {
@@ -73,7 +72,7 @@ export const GameCanvas: React.FC = () => {
     ctx.beginPath();
     ctx.moveTo(0, canvas.height);
     
-    for (let x = 0; x < state.terrain.length; x++) {
+    for (let x = 0; x < state.terrain.length && x < canvas.width; x++) {
       const y = canvas.height - state.terrain[x];
       ctx.lineTo(x, y);
     }
@@ -128,9 +127,10 @@ export const GameCanvas: React.FC = () => {
     if (state.showTrajectory && state.players[state.currentPlayerIndex]) {
       const currentPlayer = state.players[state.currentPlayerIndex];
       const vehicle = currentPlayer.vehicle;
+      const terrainY = state.terrain[Math.floor(vehicle.x)] || 0;
       
-      drawTrajectory(ctx, vehicle.x, canvas.height - state.terrain[Math.floor(vehicle.x)] - 20, 
-                    vehicle.angle, vehicle.power, state.wind, colors.ui);
+      drawTrajectory(ctx, vehicle.x, canvas.height - terrainY - 20, 
+                    vehicle.angle, vehicle.power, state.wind, colors.ui, canvas.width);
     }
 
     // Draw wind indicator
@@ -139,16 +139,19 @@ export const GameCanvas: React.FC = () => {
   }, [state, getThemeColors]);
 
   const drawTrajectory = (ctx: CanvasRenderingContext2D, startX: number, startY: number, 
-                         angle: number, power: number, wind: any, color: string) => {
+                         angle: number, power: number, wind: any, color: string, canvasWidth: number) => {
     ctx.strokeStyle = color;
     ctx.setLineDash([5, 5]);
     ctx.lineWidth = 2;
     ctx.beginPath();
 
     const angleRad = (angle * Math.PI) / 180;
-    const velocity = power * 2;
-    const vx = Math.cos(angleRad) * velocity;
-    const vy = -Math.sin(angleRad) * velocity;
+    
+    // Scale velocity so 100% power covers 3/4 of map width
+    const maxRange = canvasWidth * 0.75;
+    const scaledVelocity = (power / 100) * (maxRange / 150); // Adjusted scaling factor
+    const vx = Math.cos(angleRad) * scaledVelocity;
+    const vy = -Math.sin(angleRad) * scaledVelocity;
     
     let x = startX;
     let y = startY;
@@ -157,16 +160,16 @@ export const GameCanvas: React.FC = () => {
     
     ctx.moveTo(x, y);
     
-    for (let t = 0; t < 200; t++) {
-      velY += 0.5; // gravity
-      velX += wind.speed * 0.1; // wind effect
+    for (let t = 0; t < 300; t++) {
+      velY += 0.3; // gravity
+      velX += wind.speed * 0.05; // wind effect
       
-      x += velX * 0.1;
-      y += velY * 0.1;
+      x += velX * 0.5;
+      y += velY * 0.5;
       
       if (x < 0 || x >= state.terrain.length || y >= ctx.canvas.height) break;
       
-      const terrainHeight = ctx.canvas.height - state.terrain[Math.floor(x)];
+      const terrainHeight = ctx.canvas.height - (state.terrain[Math.floor(x)] || 0);
       if (y >= terrainHeight) break;
       
       ctx.lineTo(x, y);
@@ -184,7 +187,6 @@ export const GameCanvas: React.FC = () => {
     
     // Wind arrow
     const arrowLength = Math.abs(wind.speed) * 2;
-    const arrowX = wind.speed > 0 ? x - 50 : x - 50 + arrowLength;
     
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
@@ -192,6 +194,18 @@ export const GameCanvas: React.FC = () => {
     ctx.moveTo(x - 50, y + 10);
     ctx.lineTo(x - 50 + (wind.speed > 0 ? arrowLength : -arrowLength), y + 10);
     ctx.stroke();
+    
+    // Arrow head
+    if (wind.speed !== 0) {
+      const headX = x - 50 + (wind.speed > 0 ? arrowLength : -arrowLength);
+      const headDirection = wind.speed > 0 ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(headX, y + 10);
+      ctx.lineTo(headX - (5 * headDirection), y + 5);
+      ctx.moveTo(headX, y + 10);
+      ctx.lineTo(headX - (5 * headDirection), y + 15);
+      ctx.stroke();
+    }
   };
 
   const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {

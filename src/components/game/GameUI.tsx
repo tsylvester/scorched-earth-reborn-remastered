@@ -66,8 +66,14 @@ export const GameUI: React.FC<GameUIProps> = ({ onBackToMenu, onRestart, onOpenS
   };
 
   const handleFire = () => {
-    // Implement firing logic
-    console.log('Firing weapon!');
+    if (!currentPlayer || state.gamePhase !== 'aiming') return;
+    
+    // Calculate firing trajectory and damage
+    const vehicle = currentPlayer.vehicle;
+    console.log(`${currentPlayer.name} firing ${vehicle.selectedWeapon} at angle ${vehicle.angle}° with power ${vehicle.power}%`);
+    
+    // For now, just move to next player
+    dispatch({ type: 'NEXT_PLAYER' });
   };
 
   const getAvailableWeapons = () => {
@@ -83,22 +89,22 @@ export const GameUI: React.FC<GameUIProps> = ({ onBackToMenu, onRestart, onOpenS
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-4">
           <h1 className="text-xl font-bold text-orange-400">SCORCHED EARTH</h1>
-          <Badge variant="outline" className="text-white">
+          <Badge variant="outline" className="text-white border-gray-500">
             Round {state.round}/3
           </Badge>
         </div>
         
         <div className="flex items-center gap-2">
           <Select value={state.theme} onValueChange={handleThemeChange}>
-            <SelectTrigger className="w-32 bg-gray-700 border-gray-600">
+            <SelectTrigger className="w-32 bg-gray-700 border-gray-600 text-white">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="light">Light</SelectItem>
-              <SelectItem value="dark">Dark</SelectItem>
-              <SelectItem value="vaporwave">Vaporwave</SelectItem>
-              <SelectItem value="cyberpunk">Cyberpunk</SelectItem>
-              <SelectItem value="original">Original</SelectItem>
+            <SelectContent className="bg-gray-700 border-gray-600">
+              <SelectItem value="light" className="text-white hover:bg-gray-600">Light</SelectItem>
+              <SelectItem value="dark" className="text-white hover:bg-gray-600">Dark</SelectItem>
+              <SelectItem value="vaporwave" className="text-white hover:bg-gray-600">Vaporwave</SelectItem>
+              <SelectItem value="cyberpunk" className="text-white hover:bg-gray-600">Cyberpunk</SelectItem>
+              <SelectItem value="original" className="text-white hover:bg-gray-600">Original</SelectItem>
             </SelectContent>
           </Select>
           
@@ -106,20 +112,35 @@ export const GameUI: React.FC<GameUIProps> = ({ onBackToMenu, onRestart, onOpenS
             variant="outline"
             size="sm"
             onClick={() => dispatch({ type: 'TOGGLE_TRAJECTORY' })}
-            className={state.showTrajectory ? 'bg-orange-600' : ''}
+            className={`border-gray-600 text-white hover:bg-gray-600 ${state.showTrajectory ? 'bg-orange-600 hover:bg-orange-700' : 'bg-gray-700'}`}
           >
             <Target className="w-4 h-4" />
           </Button>
           
-          <Button variant="outline" size="sm" onClick={onOpenShop}>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={onOpenShop}
+            className="border-gray-600 text-white bg-gray-700 hover:bg-gray-600"
+          >
             <ShoppingCart className="w-4 h-4" />
           </Button>
           
-          <Button variant="outline" size="sm" onClick={onRestart}>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={onRestart}
+            className="border-gray-600 text-white bg-gray-700 hover:bg-gray-600"
+          >
             <RotateCcw className="w-4 h-4" />
           </Button>
           
-          <Button variant="outline" size="sm" onClick={onBackToMenu}>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={onBackToMenu}
+            className="border-gray-600 text-white bg-gray-700 hover:bg-gray-600"
+          >
             <Settings className="w-4 h-4" />
           </Button>
         </div>
@@ -128,7 +149,7 @@ export const GameUI: React.FC<GameUIProps> = ({ onBackToMenu, onRestart, onOpenS
       {/* Player Stats */}
       <div className="grid grid-cols-4 gap-4 mb-4">
         {state.players.map((player, index) => (
-          <Card key={player.id} className={`p-3 ${index === state.currentPlayerIndex ? 'border-orange-500 bg-orange-900/20' : 'bg-gray-700'}`}>
+          <Card key={player.id} className={`p-3 border ${index === state.currentPlayerIndex ? 'border-orange-500 bg-orange-900/20' : 'border-gray-600 bg-gray-700'}`}>
             <div className="text-sm">
               <div className="flex justify-between items-center mb-1">
                 <span style={{ color: player.color }} className="font-bold">
@@ -187,12 +208,12 @@ export const GameUI: React.FC<GameUIProps> = ({ onBackToMenu, onRestart, onOpenS
               value={currentPlayer.vehicle.selectedWeapon} 
               onValueChange={handleWeaponChange}
             >
-              <SelectTrigger className="w-32 bg-gray-700 border-gray-600">
+              <SelectTrigger className="w-32 bg-gray-700 border-gray-600 text-white">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="bg-gray-700 border-gray-600">
                 {getAvailableWeapons().map(({ weapon, count }) => (
-                  <SelectItem key={weapon} value={weapon}>
+                  <SelectItem key={weapon} value={weapon} className="text-white hover:bg-gray-600">
                     {weapon} ({count})
                   </SelectItem>
                 ))}
@@ -201,7 +222,7 @@ export const GameUI: React.FC<GameUIProps> = ({ onBackToMenu, onRestart, onOpenS
             
             <Button 
               onClick={handleFire}
-              className="w-full bg-red-600 hover:bg-red-700 font-bold"
+              className="w-full bg-red-600 hover:bg-red-700 font-bold text-white"
               disabled={state.gamePhase !== 'aiming'}
             >
               FIRE!

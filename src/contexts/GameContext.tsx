@@ -95,9 +95,25 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         terrain: generateTerrain(action.config.terrainComplexity),
         wind: generateWind(),
       };
+    case 'UPDATE_PLAYER':
+      return {
+        ...state,
+        players: state.players.map(player =>
+          player.id === action.playerId
+            ? { ...player, ...action.updates }
+            : player
+        ),
+      };
     case 'NEXT_PLAYER':
-      const nextIndex = (state.currentPlayerIndex + 1) % state.players.filter(p => p.isAlive).length;
-      return { ...state, currentPlayerIndex: nextIndex };
+      const alivePlayers = state.players.filter(p => p.isAlive);
+      const currentAliveIndex = alivePlayers.findIndex(p => p.id === state.players[state.currentPlayerIndex]?.id);
+      const nextAliveIndex = (currentAliveIndex + 1) % alivePlayers.length;
+      const nextPlayerIndex = state.players.findIndex(p => p.id === alivePlayers[nextAliveIndex]?.id);
+      return { 
+        ...state, 
+        currentPlayerIndex: nextPlayerIndex,
+        gamePhase: 'aiming'
+      };
     case 'RESTART_GAME':
       if (!state.config) return state;
       return {
@@ -121,7 +137,7 @@ function generatePlayers(config: GameConfig): Player[] {
   
   for (let i = 0; i < config.numPlayers; i++) {
     players.push({
-      id: `player-${i}`,
+      id: `player-${i}-${Date.now()}`, // Add timestamp for uniqueness
       name: i < config.numHumans ? `Player ${i + 1}` : `CPU ${names[i]}`,
       isHuman: i < config.numHumans,
       money: 1000,
@@ -129,7 +145,7 @@ function generatePlayers(config: GameConfig): Player[] {
       wins: 0,
       isAlive: true,
       vehicle: {
-        x: 100 + (i * 800 / config.numPlayers),
+        x: 100 + (i * 700 / config.numPlayers) + Math.random() * 50, // Add some randomness
         y: 0,
         health: 100,
         maxHealth: 100,
@@ -157,10 +173,13 @@ function generateTerrain(complexity: number): number[] {
   const baseHeight = 300;
   const amplitude = 100 + (complexity * 200);
   
+  // Add randomness to terrain generation
+  const randomSeed = Math.random() * 100;
+  
   for (let x = 0; x < width; x++) {
-    const noise1 = Math.sin(x * 0.01) * amplitude * 0.5;
-    const noise2 = Math.sin(x * 0.03) * amplitude * 0.3;
-    const noise3 = Math.sin(x * 0.1) * amplitude * 0.2 * complexity;
+    const noise1 = Math.sin((x + randomSeed) * 0.01) * amplitude * 0.5;
+    const noise2 = Math.sin((x + randomSeed) * 0.03) * amplitude * 0.3;
+    const noise3 = Math.sin((x + randomSeed) * 0.1) * amplitude * 0.2 * complexity;
     terrain[x] = baseHeight + noise1 + noise2 + noise3;
   }
   
