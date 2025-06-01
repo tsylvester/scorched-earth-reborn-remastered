@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useGame } from '../../contexts/GameContext';
 
@@ -6,6 +5,14 @@ export const GameCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { state, dispatch } = useGame();
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [projectiles, setProjectiles] = useState<Array<{
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    playerId: string;
+    weapon: string;
+  }>>([]);
 
   const getThemeColors = useCallback(() => {
     switch (state.theme) {
@@ -93,11 +100,11 @@ export const GameCanvas: React.FC = () => {
       ctx.fillStyle = player.color;
       ctx.fillRect(vehicle.x - 10, vehicleY, 20, 15);
       
-      // Vehicle turret
+      // Vehicle turret - angle should be from vertical axis
       const turretLength = 25;
-      const angleRad = (vehicle.angle * Math.PI) / 180;
-      const turretEndX = vehicle.x + Math.cos(angleRad) * turretLength;
-      const turretEndY = vehicleY - Math.sin(angleRad) * turretLength;
+      const angleRad = ((90 - vehicle.angle) * Math.PI) / 180; // Convert from vertical reference
+      const turretEndX = vehicle.x + Math.sin(angleRad) * turretLength;
+      const turretEndY = vehicleY - Math.cos(angleRad) * turretLength;
       
       ctx.strokeStyle = player.color;
       ctx.lineWidth = 3;
@@ -123,20 +130,35 @@ export const GameCanvas: React.FC = () => {
       ctx.fillText(player.name, vehicle.x, vehicleY - 35);
     });
 
+    // Draw projectiles
+    projectiles.forEach(projectile => {
+      ctx.fillStyle = '#ff0000';
+      ctx.beginPath();
+      ctx.arc(projectile.x, projectile.y, 3, 0, 2 * Math.PI);
+      ctx.fill();
+    });
+
     // Draw trajectory preview if enabled
     if (state.showTrajectory && state.players[state.currentPlayerIndex]) {
       const currentPlayer = state.players[state.currentPlayerIndex];
       const vehicle = currentPlayer.vehicle;
       const terrainY = state.terrain[Math.floor(vehicle.x)] || 0;
+      const vehicleY = canvas.height - terrainY - 20;
       
-      drawTrajectory(ctx, vehicle.x, canvas.height - terrainY - 20, 
+      // Calculate turret end position for trajectory start
+      const turretLength = 25;
+      const angleRad = ((90 - vehicle.angle) * Math.PI) / 180;
+      const turretEndX = vehicle.x + Math.sin(angleRad) * turretLength;
+      const turretEndY = vehicleY - Math.cos(angleRad) * turretLength;
+      
+      drawTrajectory(ctx, turretEndX, turretEndY, 
                     vehicle.angle, vehicle.power, state.wind, colors.ui, canvas.width);
     }
 
     // Draw wind indicator
     drawWindIndicator(ctx, canvas.width - 100, 50, state.wind, colors.ui);
 
-  }, [state, getThemeColors]);
+  }, [state, getThemeColors, projectiles]);
 
   const drawTrajectory = (ctx: CanvasRenderingContext2D, startX: number, startY: number, 
                          angle: number, power: number, wind: any, color: string, canvasWidth: number) => {
@@ -145,13 +167,15 @@ export const GameCanvas: React.FC = () => {
     ctx.lineWidth = 2;
     ctx.beginPath();
 
-    const angleRad = (angle * Math.PI) / 180;
+    // Convert angle from vertical reference to radians
+    const angleRad = ((90 - angle) * Math.PI) / 180;
     
     // Scale velocity so 100% power covers 3/4 of map width
     const maxRange = canvasWidth * 0.75;
-    const scaledVelocity = (power / 100) * (maxRange / 150); // Adjusted scaling factor
-    const vx = Math.cos(angleRad) * scaledVelocity;
-    const vy = -Math.sin(angleRad) * scaledVelocity;
+    const baseVelocity = 8; // Base velocity for physics
+    const scaledVelocity = (power / 100) * baseVelocity;
+    const vx = Math.sin(angleRad) * scaledVelocity;
+    const vy = -Math.cos(angleRad) * scaledVelocity;
     
     let x = startX;
     let y = startY;
@@ -160,12 +184,12 @@ export const GameCanvas: React.FC = () => {
     
     ctx.moveTo(x, y);
     
-    for (let t = 0; t < 300; t++) {
-      velY += 0.3; // gravity
-      velX += wind.speed * 0.05; // wind effect
+    for (let t = 0; t < 500; t++) {
+      velY += 0.1; // gravity
+      velX += wind.speed * 0.01; // Much reduced wind effect
       
-      x += velX * 0.5;
-      y += velY * 0.5;
+      x += velX;
+      y += velY;
       
       if (x < 0 || x >= state.terrain.length || y >= ctx.canvas.height) break;
       
@@ -221,7 +245,7 @@ export const GameCanvas: React.FC = () => {
     const currentPlayer = state.players[state.currentPlayerIndex];
     if (!currentPlayer || !currentPlayer.isHuman) return;
 
-    // Calculate angle based on click position
+    // Calculate angle based on click position relative to vehicle
     const vehicle = currentPlayer.vehicle;
     const vehicleScreenX = vehicle.x;
     const terrainY = state.terrain[Math.floor(vehicle.x)] || 0;
@@ -229,7 +253,9 @@ export const GameCanvas: React.FC = () => {
 
     const dx = x - vehicleScreenX;
     const dy = vehicleScreenY - y;
-    const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    
+    // Convert to angle from vertical (0 = straight up, positive = right, negative = left)
+    const angle = Math.atan2(dx, dy) * (180 / Math.PI);
     
     // Clamp angle between -90 and 90 degrees
     const clampedAngle = Math.max(-90, Math.min(90, angle));
@@ -246,6 +272,90 @@ export const GameCanvas: React.FC = () => {
       },
     });
   };
+
+  // Animation loop for projectiles
+  useEffect(() => {
+    if (projectiles.length === 0) return;
+
+    const animate = () => {
+      setProjectiles(prev => {
+        const updated = prev.map(projectile => {
+          const newVy = projectile.vy + 0.1; // gravity
+          const newVx = projectile.vx + state.wind.speed * 0.01; // wind effect
+          const newX = projectile.x + newVx;
+          const newY = projectile.y + newVy;
+          
+          return {
+            ...projectile,
+            x: newX,
+            y: newY,
+            vx: newVx,
+            vy: newVy
+          };
+        });
+
+        // Remove projectiles that hit terrain or go off screen
+        return updated.filter(projectile => {
+          const canvas = canvasRef.current;
+          if (!canvas) return false;
+          
+          if (projectile.x < 0 || projectile.x >= canvas.width || projectile.y >= canvas.height) {
+            return false;
+          }
+          
+          const terrainHeight = canvas.height - (state.terrain[Math.floor(projectile.x)] || 0);
+          if (projectile.y >= terrainHeight) {
+            // Handle explosion damage here
+            return false;
+          }
+          
+          return true;
+        });
+      });
+    };
+
+    const interval = setInterval(animate, 16); // ~60fps
+    return () => clearInterval(interval);
+  }, [projectiles, state.terrain, state.wind.speed]);
+
+  // Function to fire a projectile
+  const fireProjectile = useCallback((playerId: string, weapon: string) => {
+    const player = state.players.find(p => p.id === playerId);
+    if (!player) return;
+
+    const vehicle = player.vehicle;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const terrainY = state.terrain[Math.floor(vehicle.x)] || 0;
+    const vehicleY = canvas.height - terrainY - 20;
+    
+    // Calculate turret end position
+    const turretLength = 25;
+    const angleRad = ((90 - vehicle.angle) * Math.PI) / 180;
+    const startX = vehicle.x + Math.sin(angleRad) * turretLength;
+    const startY = vehicleY - Math.cos(angleRad) * turretLength;
+    
+    // Calculate initial velocity
+    const baseVelocity = 8;
+    const scaledVelocity = (vehicle.power / 100) * baseVelocity;
+    const vx = Math.sin(angleRad) * scaledVelocity;
+    const vy = -Math.cos(angleRad) * scaledVelocity;
+
+    setProjectiles(prev => [...prev, {
+      x: startX,
+      y: startY,
+      vx,
+      vy,
+      playerId,
+      weapon
+    }]);
+  }, [state.players, state.terrain]);
+
+  // Expose fireProjectile to parent components
+  useEffect(() => {
+    (window as any).fireProjectile = fireProjectile;
+  }, [fireProjectile]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

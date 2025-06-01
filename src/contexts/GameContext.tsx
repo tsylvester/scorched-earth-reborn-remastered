@@ -104,6 +104,26 @@ function gameReducer(state: GameState, action: GameAction): GameState {
             : player
         ),
       };
+    case 'PURCHASE_WEAPON':
+      return {
+        ...state,
+        players: state.players.map(player => {
+          if (player.id === action.playerId && player.money >= action.cost) {
+            return {
+              ...player,
+              money: player.money - action.cost,
+              vehicle: {
+                ...player.vehicle,
+                weapons: {
+                  ...player.vehicle.weapons,
+                  [action.weapon]: (player.vehicle.weapons[action.weapon] || 0) + action.quantity
+                }
+              }
+            };
+          }
+          return player;
+        })
+      };
     case 'NEXT_PLAYER':
       const alivePlayers = state.players.filter(p => p.isAlive);
       const currentAliveIndex = alivePlayers.findIndex(p => p.id === state.players[state.currentPlayerIndex]?.id);

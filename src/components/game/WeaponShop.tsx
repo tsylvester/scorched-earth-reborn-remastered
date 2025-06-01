@@ -32,6 +32,7 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({ onClose }) => {
     const totalCost = weaponData.price * quantity;
     
     if (currentPlayer.money >= totalCost) {
+      console.log(`Purchasing ${quantity} ${weapon}(s) for $${totalCost}`);
       dispatch({
         type: 'PURCHASE_WEAPON',
         playerId: currentPlayer.id,
@@ -39,6 +40,8 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({ onClose }) => {
         quantity,
         cost: totalCost,
       });
+    } else {
+      console.log(`Not enough money to purchase ${weapon}. Need $${totalCost}, have $${currentPlayer.money}`);
     }
   };
 

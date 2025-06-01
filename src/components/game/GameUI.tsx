@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { useGame } from '../../contexts/GameContext';
 import { Button } from '@/components/ui/button';
@@ -68,12 +67,41 @@ export const GameUI: React.FC<GameUIProps> = ({ onBackToMenu, onRestart, onOpenS
   const handleFire = () => {
     if (!currentPlayer || state.gamePhase !== 'aiming') return;
     
-    // Calculate firing trajectory and damage
     const vehicle = currentPlayer.vehicle;
-    console.log(`${currentPlayer.name} firing ${vehicle.selectedWeapon} at angle ${vehicle.angle}° with power ${vehicle.power}%`);
+    const selectedWeapon = vehicle.selectedWeapon;
     
-    // For now, just move to next player
-    dispatch({ type: 'NEXT_PLAYER' });
+    // Check if player has the selected weapon
+    if (!vehicle.weapons[selectedWeapon] || vehicle.weapons[selectedWeapon] <= 0) {
+      console.log(`No ${selectedWeapon} ammunition available`);
+      return;
+    }
+    
+    console.log(`${currentPlayer.name} firing ${selectedWeapon} at angle ${vehicle.angle}° with power ${vehicle.power}%`);
+    
+    // Consume ammunition
+    dispatch({
+      type: 'UPDATE_PLAYER',
+      playerId: currentPlayer.id,
+      updates: {
+        vehicle: {
+          ...vehicle,
+          weapons: {
+            ...vehicle.weapons,
+            [selectedWeapon]: vehicle.weapons[selectedWeapon] - 1
+          }
+        }
+      }
+    });
+    
+    // Fire the projectile
+    if ((window as any).fireProjectile) {
+      (window as any).fireProjectile(currentPlayer.id, selectedWeapon);
+    }
+    
+    // Move to next player after a delay to allow projectile to complete
+    setTimeout(() => {
+      dispatch({ type: 'NEXT_PLAYER' });
+    }, 3000);
   };
 
   const getAvailableWeapons = () => {
